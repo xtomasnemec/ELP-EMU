@@ -9,8 +9,8 @@ sys.stdout.reconfigure(encoding='utf-8')  # Přidáno pro správné zobrazován�
 
 
 #var
-zastavka = "Beloruska" #jestli je v nazvu mezera tak misto ni pouzij + (Krivankovo+Namesti)
-nastupiste = "1" #nastupiste (nech prazdy aby se ukazovali vsechny odjezdy)
+zastavka = "Hlavni+Nadrazi" #jestli je v nazvu mezera tak misto ni pouzij + (Krivankovo+Namesti)
+nastupiste = "" #nastupiste (nech prazdy aby se ukazovali vsechny odjezdy)
 
 
 # API 
@@ -23,11 +23,10 @@ def clear():
     os.system('cls' if os.name == 'nt' else 'clear')
 
 def parse_time(cas):
-    # Pokud je čas ve formátu "Nmin"
-    m = re.match(r"(\d+)min", cas)
+    # Povolit +, -, ± na začátku
+    m = re.match(r"[+\-±]?(\d+)min", cas)
     if m:
         return int(m.group(1))
-    # Pokud je čas ve formátu "HH:MM"
     m = re.match(r"(\d{1,2}):(\d{2})", cas)
     if m:
         now = datetime.now()
@@ -36,7 +35,6 @@ def parse_time(cas):
         if t < now:
             t += timedelta(days=1)  # Přes půlnoc
         return int((t - now).total_seconds() // 60)
-    # Pokud je čas "**" nebo něco jiného, dej zápornou hodnotu (bude první)
     if cas.strip() == "**":
         return -1
     return 9999

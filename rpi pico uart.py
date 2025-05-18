@@ -22,17 +22,16 @@ while not wlan.isconnected():
     time.sleep(1)
 
 def parse_time(cas):
-    m = re.match(r"(\d+)min", cas)
+    # Povolit +, -, ± na začátku
+    m = re.match(r"[+\-±]?(\d+)min", cas)
     if m:
         return int(m.group(1))
     m = re.match(r"(\d{1,2}):(\d{2})", cas)
     if m:
         now = utime.localtime()
         h, mi = int(m.group(1)), int(m.group(2))
-        # Dnešní čas v sekundách od půlnoci
         now_sec = now[3]*3600 + now[4]*60
         t_sec = h*3600 + mi*60
-        # Pokud je čas v minulosti, je to zítra
         if t_sec < now_sec:
             t_sec += 24*3600
         return (t_sec - now_sec) // 60

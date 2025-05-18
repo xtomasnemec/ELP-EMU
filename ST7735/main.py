@@ -27,7 +27,8 @@ while not wlan.isconnected():
     time.sleep(1)
 
 def parse_time(cas):
-    m = re.match(r"(\d+)min", cas)
+    # Povolit +, -, ± na začátku
+    m = re.match(r"[+\-±]?(\d+)min", cas)
     if m:
         return int(m.group(1))
     m = re.match(r"(\d{1,2}):(\d{2})", cas)
@@ -45,25 +46,7 @@ def parse_time(cas):
 
 def clear():
     print("\n" * 20)
-
-#vozik pro beznohy pixel art
-vozicek = [
-    [0,0,0,1,0,0,0,0],  # 0xef -> 0x10
-    [0,0,1,0,0,0,0,0],  # 0xdf -> 0x20
-    [0,0,1,0,0,0,0,0],  # 0xdf -> 0x20
-    [0,0,1,0,0,0,0,0],  # 0xdf -> 0x20
-    [0,1,1,1,1,0,0,0],  # 0x87 -> 0x78
-    [0,1,0,0,1,1,0,0],  # 0xb3 -> 0x4C
-    [0,1,0,0,0,1,1,0],  # 0xb9 -> 0x46
-    [0,0,1,1,1,0,0,0],  # 0xc7 -> 0x38
-]
-
-def draw_vozicek(tft, x, y, color=0xFFFF):
-    for row in range(8):
-        for col in range(8):
-            if vozicek[row][col]:
-                tft.pixel(x+col, y+row, color)
-                
+            
 #nacist vsechen bordel
 def fetch():
     url = "https://www.idsjmk.cz/api/departures/busstop-by-name?busStopName=" + str(zastavka) + "&place=" + str(nastupiste)
