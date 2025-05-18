@@ -4,6 +4,8 @@ import rp2
 import machine
 import urequests as requests
 import st7735
+import utime
+import re
 
 #var
 zastavka = "Beloruska" #jestli je v nazvu mezera tak misto ni pouzij + (Krivankovo+Namesti)
@@ -17,74 +19,92 @@ rp2.country('CZ')  # Nastavení země pro Wi-Fi
 network.WLAN(network.STA_IF).active(True)  # Aktivace Wi-Fi
 network.WLAN(network.STA_IF).connect(ssid, password)  # Připojení k Wi-Fi
 
-while not network.WLAN(network.STA_IF).isconnected():
+# Připojení k Wi-Fi
+wlan = network.WLAN(network.STA_IF)
+wlan.active(True)
+wlan.connect(ssid, password)
+while not wlan.isconnected():
     time.sleep(1)
 
-#nejakej test displeje od chatgpt
-spi = machine.SPI(1, baudrate=20000000, polarity=0, phase=0)
-tft = st7735.ST7735(
-    spi,
-    dc=machine.Pin(14),
-    cs=machine.Pin(13),
-    rst=machine.Pin(15),
-    width=128,
-    height=160,
-    rotation=1
-)
-tft.init()
-tft.fill(0)
-tft.text("ST7735 OK!", 10, 10, 0xFFFF)
+def parse_time(cas):
+    m = re.match(r"(\d+)min", cas)
+    if m:
+        return int(m.group(1))
+    m = re.match(r"(\d{1,2}):(\d{2})", cas)
+    if m:
+        now = utime.localtime()
+        h, mi = int(m.group(1)), int(m.group(2))
+        now_sec = now[3]*3600 + now[4]*60
+        t_sec = h*3600 + mi*60
+        if t_sec < now_sec:
+            t_sec += 24*3600
+        return (t_sec - now_sec) // 60
+    if cas.strip() == "**":
+        return -1
+    return 9999
 
-# API 
-url = "https://www.idsjmk.cz/api/departures/busstop-by-name?busStopName=" + str(zastavka) + "&place=" + str(nastupiste)
-response = requests.get(url)
-print(url)
-
-#clear
 def clear():
-    # MicroPython nemá os.system, místo toho vypiš prázdné řádky, nemaz to, je to na debug pres uart
     print("\n" * 20)
 
+#vozik pro beznohy pixel art
+vozicek = [
+    [0,0,0,1,0,0,0,0],  # 0xef -> 0x10
+    [0,0,1,0,0,0,0,0],  # 0xdf -> 0x20
+    [0,0,1,0,0,0,0,0],  # 0xdf -> 0x20
+    [0,0,1,0,0,0,0,0],  # 0xdf -> 0x20
+    [0,1,1,1,1,0,0,0],  # 0x87 -> 0x78
+    [0,1,0,0,1,1,0,0],  # 0xb3 -> 0x4C
+    [0,1,0,0,0,1,1,0],  # 0xb9 -> 0x46
+    [0,0,1,1,1,0,0,0],  # 0xc7 -> 0x38
+]
+
+def draw_vozicek(tft, x, y, color=0xFFFF):
+    for row in range(8):
+        for col in range(8):
+            if vozicek[row][col]:
+                tft.pixel(x+col, y+row, color)
+                
 #nacist vsechen bordel
 def fetch():
+    url = "https://www.idsjmk.cz/api/departures/busstop-by-name?busStopName=" + str(zastavka) + "&place=" + str(nastupiste)
+    response = requests.get(url)
+    print(url)
     if response.status_code == 200:
         data = response.json()
         stops = data['stops']
+        odjezdy = []
 
         for stop in stops:
             signs = stop['signs']
             infotext = stop['infoText']
-
             for sign in signs:
                 departures = sign['departures']
                 for departure in departures:
-                    # print vsech info
                     linka = departure['link']
                     konecna = departure['destinationStop']
                     cas = departure['time']
-                    if "♿" in cas:
-                        fixedcas = cas.replace("♿", "",)
-                        beznohy = True
-                    else:
-                        beznohy = False
-                        fixedcas = cas
-                    if beznohy == True:
-                        print(linka, konecna, "♿", fixedcas)
-                    elif beznohy == False:
-                        print(linka, konecna, fixedcas)
-            print("--------------------------------------------------------------------")
-            # Pokud infotext je seznam, vypiš každý řádek zvlášť
-            if isinstance(infotext, list):
-                for info in infotext:
-                    print(info)
-            else:
-                print(infotext)
+                    beznohy = "♿" in cas
+                    fixedcas = cas.replace("♿", "").strip()
+                    odjezdy.append((parse_time(fixedcas), linka, konecna, "♿" if beznohy else "", fixedcas))
+        # Seřadit podle času
+        odjezdy.sort(key=lambda x: x[0])
+        # Výpis na displej (příklad, uprav podle potřeby)
+        tft.fill(0)
+        y = 0
+        for _, linka, konecna, vozik, cas in odjezdy[:12]:
+            tft.text(f"{linka} {konecna} {vozik} {cas}", 0, y, 0xFFFF)
+            y += 10
+        # infotext na displej
+        if isinstance(infotext, list):
+            for info in infotext:
+                tft.text(str(info)[:16], 0, y, 0xFFE0)
+                y += 10
+        else:
+            tft.text(str(infotext)[:16], 0, y, 0xFFE0)
     else:
-        print("Skill issue, nenačetlo se to. Status code:", response.status_code)
+        tft.fill(0)
+        tft.text("Skill issue", 0, 0, 0xF800)
 
-
-loop = True
-while loop:
-    clear()
+while True:
     fetch()
     time.sleep(5)
