@@ -10,7 +10,7 @@ sys.stdout.reconfigure(encoding='utf-8')  # Přidáno pro správné zobrazován�
 
 #var
 zastavka = "Hlavni+Nadrazi" #jestli je v nazvu mezera tak misto ni pouzij + (Krivankovo+Namesti)
-nastupiste = "" #nastupiste (nech prazdy aby se ukazovali vsechny odjezdy)
+nastupiste = "78" #nastupiste (nech prazdy aby se ukazovali vsechny odjezdy)
 
 
 # API 

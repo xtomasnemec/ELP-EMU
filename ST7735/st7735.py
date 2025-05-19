@@ -683,6 +683,7 @@ class TFT(object) :
     self._writedata(self.windowLocData)
 
     self._writecommand(TFT.RASET)                #Row address set.
+    self.windowLocData[1] = 1                   #Start at row 2.
     self.windowLocData[3] = self._size[1] - 1
     self._writedata(self.windowLocData)
 
@@ -922,3 +923,6 @@ def makeg(  ) :
   t.initg()
   t.fill(0)
   return t
+
+for i in range(0, 128, 8):
+    tft.pixel((i, 159))
