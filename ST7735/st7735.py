@@ -903,6 +903,35 @@ class TFT(object) :
 
     self.cs(1)
 
+  def show_bmp(self, filename, x=0, y=0):
+    with open(filename, "rb") as f:
+        if f.read(2) != b'BM':
+            print("Not a BMP file")
+            return
+        f.seek(10)
+        offset = int.from_bytes(f.read(4), "little")
+        f.seek(18)
+        width = int.from_bytes(f.read(4), "little")
+        height = int.from_bytes(f.read(4), "little")
+        f.seek(28)
+        bpp = int.from_bytes(f.read(2), "little")
+        if bpp != 24:
+            print("Only 24-bit BMP files are supported")
+            return
+        row_size = ((width * 3 + 3) // 4) * 4  # BMP řádky jsou zarovnané na 4 byty
+        f.seek(offset)
+        for row in range(height):
+            f.seek(offset + (height - 1 - row) * row_size)
+            line = f.read(width * 3)
+            buf = bytearray(width * 2)
+            for col in range(width):
+                b = line[col*3]
+                g = line[col*3+1]
+                r = line[col*3+2]
+                color = ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3)
+                buf[col*2] = color >> 8
+                buf[col*2+1] = color & 0xFF
+            self.image(x, y+row, x+width-1, y+row, buf)
 def maker(  ) :
   t = TFT(1, "X1", "X2")
   print("Initializing")
@@ -923,6 +952,3 @@ def makeg(  ) :
   t.initg()
   t.fill(0)
   return t
-
-for i in range(0, 128, 8):
-    tft.pixel((i, 159))
