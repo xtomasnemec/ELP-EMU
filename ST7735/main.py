@@ -12,12 +12,13 @@ import ntptime
 #var
 zastavka = "Beloruska" #jestli je v nazvu mezera tak misto ni pouzij + (Krivankovo+Namesti)
 nastupiste = "" #nastupiste (nech prazdy aby se ukazovali vsechny odjezdy)
-ssid = "SSID"  # Zde zadejte název vaší Wi-Fi sítě
-password = "passwd"  # Zde zadejte heslo k vaší Wi-Fi síti
+ssid = "SSID"  # Zde zadejte název vaší Wi-Fi sítě (deafult: SSID)
+password = "passwd"  # Zde zadejte heslo k vaší Wi-Fi síti (deafult: passwd)
 
 #barvicky
 WHITE = 0xFFFF
 RED = 0xF800
+YELLOW = 0xFFE0
 
 # Nastavení SPI a pinů
 spi = machine.SPI(1, baudrate=20000000, polarity=0, phase=0)
@@ -76,18 +77,45 @@ tft.text((0, 12), wlan.ifconfig()[0], WHITE, sysfont)
 print("Wi-Fi pripojena, IP adresa:", wlan.ifconfig()[0])
 time.sleep(2)  # <-- přidejte tuto řádku
 
+#píčoviny co něco dělaj s časem
 def sync_time():
     try:
-        ntptime.host = "pool.ntp.org"  # můžeš změnit na cz.pool.ntp.org
+        ntptime.host = "cz.pool.ntp.org"
         ntptime.settime()
         print("Čas synchronizován z NTP.")
     except Exception as e:
         print("NTP sync failed:", e)
+   
+def cesky_cas():
+     # ceskej cas
+    t = utime.localtime(utime.time())
+    year, month, mday, hour, minute, second, weekday, yearday = t
+    def last_sunday(year, month):
+        for day in range(31, 24, -1):
+            try:
+                if utime.localtime(utime.mktime((year, month, day, 0, 0, 0, 0, 0)))[6] == 6:
+                    return day
+            except:
+                continue
+        return 31
 
-sync_time()  # <-- přidej tuto řádku
+    start_dst = last_sunday(year, 3)
+    end_dst = last_sunday(year, 10)
+
+    if (month > 3 and month < 10) or \
+       (month == 3 and (mday > start_dst or (mday == start_dst and hour >= 2))) or \
+       (month == 10 and (mday < end_dst or (mday == end_dst and hour < 3))):
+        offset = 2  # CEST
+    else:
+        offset = 1  # CET
+
+    cesky_cas = utime.localtime(utime.time() + offset * 3600)
+    return cesky_cas
+
+sync_time()
 
 def strip_diacritics(text):
-    # Ručně nahradí českou/slovenskou diakritiku za nejbližší ASCII znak
+    # ascii znaky
     replace = (
         ("á", "a"), ("č", "c"), ("ď", "d"), ("é", "e"), ("ě", "e"), ("í", "i"),
         ("ň", "n"), ("ó", "o"), ("ř", "r"), ("š", "s"), ("ť", "t"), ("ú", "u"),
@@ -101,28 +129,34 @@ def strip_diacritics(text):
     return text
 
 def to_ascii(text):
-    # Nejprve odstraní diakritiku, pak nahradí zbylé ne-ASCII znaky otazníkem
     text = strip_diacritics(text)
-    return ''.join(c if 32 <= ord(c) <= 126 else '?' for c in text)
+    return ''.join(c if 32 <= ord(c) <= 126 else ' ' for c in text)
 
 def parse_time(cas):
     cas = str(cas).strip()
+    cas = cas.replace("♿", "")  # Odstraň emoji vozíčkáře
     cas = cas.encode('ascii', 'ignore').decode()
-    if ':' in cas:
-        h, mi = cas.split(':')
-        now = utime.localtime()
-        h = int(h)
-        mi = int(mi)
-        now_sec = now[3]*3600 + now[4]*60
-        t_sec = h*3600 + mi*60
-        if t_sec < now_sec:
-            t_sec += 24*3600
-        return (t_sec - now_sec) // 60
     m = re.match(r"[+\-±]?(\d+)min", cas)
     if m:
-        return int(m.group(1))
+        try:
+            return int(m.group(1))
+        except Exception:
+            return 999999
+    if ':' in cas:
+        try:
+            h, mi = cas.split(':')
+            now = cesky_cas()
+            h = int(h)
+            mi = int(mi)
+            now_sec = now[3]*3600 + now[4]*60
+            t_sec = h*3600 + mi*60
+            if t_sec < now_sec:
+                t_sec += 24*3600
+            return (t_sec - now_sec) // 60
+        except Exception:
+            return 999999
     if cas == "**":
-        return -1
+        return 0
     return 999999
 
 def clear():
@@ -138,24 +172,21 @@ last_error = ""
 stopname = ""
 
 def draw_departures(odjezdy, infotext, scroll_offset):
-    global last_error, stopname
+    global last_error, stopname, scroll_offset_info
 
-    # První řádek: zobraz zastavka s nahrazením + za mezeru
+    # ten vrchni radek
     tft.fillrect((0, 0), (160, 10), 0)
     stopid = zastavka.replace("+", " ")[:20]
-    now = utime.localtime()
+    now = cesky_cas()
     cas = "{:02d}:{:02d}:{:02d}".format(now[3], now[4], now[5])
     tft.text((0, 0), stopid + " " + nastupiste, WHITE, sysfont)
     tft.text((110, 0), cas, WHITE, sysfont)
-
-    # Druhý řádek: hlavička
     tft.fillrect((0, 10), (160, 10), 0)
     tft.text((0, 10), "Linka", WHITE, sysfont)
-    tft.text((60, 10), "Cil", WHITE, sysfont)
+    tft.text((60, 10), "Smer", WHITE, sysfont)
     tft.text((108, 10), "NP", WHITE, sysfont)
     tft.text((124, 10), "Odjezd", WHITE, sysfont)
-
-    y = 20  # další řádky začínají až pod tímto
+    y = 20
 
 
     if last_error:
@@ -167,8 +198,11 @@ def draw_departures(odjezdy, infotext, scroll_offset):
                 tft.text((0, y + 12 + i*12), part, RED, sysfont)
         return
 
-    if odjezdy:
-        for _, linka, konecna, vozik, cas in odjezdy[:6]:
+    if not odjezdy:
+        tft.text((0, y), "Zadne odjezdy", RED, sysfont)
+        y += 10
+    else:
+        for _, linka, konecna, vozik, cas in odjezdy[:10]:
             clear_line(y, 0)
             linka_ascii = to_ascii(f"{linka}")
             linka_px = len(linka_ascii) * 6
@@ -187,13 +221,15 @@ def draw_departures(odjezdy, infotext, scroll_offset):
                 konecna_visible = konecna_ascii[start_k:start_k+konecna_visible_chars]
             else:
                 konecna_visible = konecna_ascii
-            if str(cas).strip() == "**":
-                if (scroll_offset % 2) == 0:
+            if str(cas).replace("♿", "").strip() == "**":
+                if ((scroll_offset // blikani_hvezdicek) % 2) == 0:
                     cas_text = "**"
                 else:
                     cas_text = "  "
             else:
-                cas_text = to_ascii(str(cas))
+                cas_clean = str(cas).replace("♿", "")
+                cas_text = to_ascii(cas_clean)
+
             x_cas = 159 - len(cas_text) * 6
 
             tft.text((0, y), linka_visible, RED, sysfont)
@@ -201,9 +237,6 @@ def draw_departures(odjezdy, infotext, scroll_offset):
             tft.text((112, y), to_ascii(f"{vozik}"), RED, sysfont)
             tft.text((x_cas, y), cas_text, RED, sysfont)
             y += 10
-    else:
-        tft.text((0, y), "Zadne odjezdy", RED, sysfont)
-        y += 10
     if infotext:
         # Pokud je infotext list, zobrazuj vždy jen jeden a cykli podle scroll_offset
         if isinstance(infotext, list) and len(infotext) > 0:
@@ -214,7 +247,7 @@ def draw_departures(odjezdy, infotext, scroll_offset):
             scroll_steps = [max(1, len(info_ascii) - visible_chars + 1) for info_ascii in info_ascii_list]
             total_steps = sum(scroll_steps)
             # Najdi, který infotext se má aktuálně zobrazit
-            step = scroll_offset % total_steps
+            step = scroll_offset_info % total_steps
             acc = 0
             for idx, steps in enumerate(scroll_steps):
                 if step < acc + steps:
@@ -222,7 +255,7 @@ def draw_departures(odjezdy, infotext, scroll_offset):
                     local_offset = step - acc
                     info_visible = info_ascii[local_offset:local_offset+visible_chars]
                     clear_line(y, 0)
-                    tft.text((0, y), info_visible, 0xFFE0, sysfont)
+                    tft.text((0, y), info_visible, YELLOW, sysfont)
                     break
                 acc += steps
         else:
@@ -230,11 +263,11 @@ def draw_departures(odjezdy, infotext, scroll_offset):
             info_ascii = to_ascii(str(infotext))
             visible_chars = 160 // 6  # 26 znaků na řádek
             if len(info_ascii) > visible_chars:
-                start = scroll_offset % (len(info_ascii) - visible_chars + 1)
+                start = scroll_offset_info % (len(info_ascii) - visible_chars + 1)
                 info_visible = info_ascii[start:start+visible_chars]
             else:
                 info_visible = info_ascii
-            tft.text((0, y), info_visible, 0xFFE0, sysfont)
+            tft.text((0, y), info_visible, YELLOW, sysfont)
 
 def fetch():
     global last_odjezdy, last_infotext, last_error, stopname
@@ -280,12 +313,8 @@ def fetch():
                     konecna = departure.get('destinationStop', '')
                     cas = departure.get('time', '')
                     beznohy = "♿" in cas
-                    fixedcas = re.sub(r"[^\d:]", "", cas)
-                    print("API cas:", repr(cas))
-                    print("FIXED cas:", repr(fixedcas))
-                    parsed = parse_time(fixedcas)
-                    print("PARSED:", parsed)
-                    odjezdy.append((parsed, linka, konecna, "o" if beznohy else "", fixedcas))
+                    parsed = parse_time(cas)
+                    odjezdy.append((parsed, linka, konecna, "o" if beznohy else "", cas))
         odjezdy_valid = [o for o in odjezdy if o[0] >= 0]
         odjezdy_invalid = [o for o in odjezdy if o[0] < 0]
         odjezdy_valid.sort(key=lambda x: x[0])
@@ -300,23 +329,24 @@ def fetch():
         last_infotext = ""
         stopname = ""
         last_error = "HTTP " + str(response.status_code)
-    for o in odjezdy:
-        print("DEBUG:", o)
-        print("API cas:", repr(cas))
-        print("FIXED cas:", repr(fixedcas))
 
 # Hlavní smyčka
 fetch_interval = 15  # sekund
-draw_interval = 0.5  # sekund
+draw_interval = 0.2  # sekund
 last_fetch = utime.time()
 scroll_offset = 0
+scroll_offset_info = 0
+blikani_hvezdicek = 1
+
+now = cesky_cas()
+cas = "{:02d}:{:02d}:{:02d}".format(now[3], now[4], now[5])
 
 while True:
-    now = utime.time()
-    if now - last_fetch >= fetch_interval:
+    now = cesky_cas()  # místo utime.localtime()
+    if utime.time() - last_fetch >= fetch_interval:
         fetch()
-        last_fetch = now
-
+        last_fetch = utime.time()
     draw_departures(last_odjezdy, last_infotext, scroll_offset)
     scroll_offset += 1
+    scroll_offset_info += 3
     utime.sleep(0.1)
