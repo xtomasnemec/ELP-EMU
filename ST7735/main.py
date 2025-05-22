@@ -308,6 +308,11 @@ def fetch():
                     if str(sign.get('busStopSign', {}).get('number', '')) != str(nastupiste):
                         continue
                 departures = sign.get('departures', [])
+                if not departures:
+                    last_odjezdy = []
+                    last_infotext = infotext
+                    stopname = stop.get('name', '')
+                    return
                 for departure in departures:
                     linka = departure.get('link', '')
                     konecna = departure.get('destinationStop', '')
