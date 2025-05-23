@@ -104,10 +104,12 @@ class TFT(object) :
     '''Create a 565 rgb TFTColor value'''
     return TFTColor(aR, aG, aB)
 
-  def __init__( self, spi, aDC, aReset, aCS) :
+  def __init__(self, spi, aDC, aReset, aCS):
     """aLoc SPI pin location is either 1 for 'X' or 2 for 'Y'.
        aDC is the DC pin and aReset is the reset pin."""
     self._size = ScreenSize
+    # Frame buffer: 16bit (2 bytes per pixel)
+    self.framebuf = bytearray(self._size[0] * self._size[1] * 2)
     self._offset = bytearray([0,0])
     self.rotate = 0                    #Vertical with top toward pins.
     self._rgb = True                   #color order of rgb.
@@ -903,6 +905,18 @@ class TFT(object) :
 
     self.cs(1)
 
+  def show(self):
+        """Push the frame buffer to the display."""
+        self._setwindowloc((0, 0), (self._size[0] - 1, self._size[1] - 1))
+        self._writedata(self.framebuf)
+
+  def show_partial(self, x, y, w, h):
+    """Push only a rectangle (x, y, w, h) from framebuffer to the display."""
+    self._setwindowloc((x, y), (x + w - 1, y + h - 1))
+    for row in range(h):
+        idx = 2 * ((y + row) * self._size[0] + x)
+        self._writedata(self.framebuf[idx:idx + w * 2])
+
   def show_bmp(self, filename, x=0, y=0):
     with open(filename, "rb") as f:
         if f.read(2) != b'BM':
@@ -932,23 +946,77 @@ class TFT(object) :
                 buf[col*2] = color >> 8
                 buf[col*2+1] = color & 0xFF
             self.image(x, y+row, x+width-1, y+row, buf)
-def maker(  ) :
-  t = TFT(1, "X1", "X2")
-  print("Initializing")
-  t.initr()
-  t.fill(0)
-  return t
 
-def makeb(  ) :
-  t = TFT(1, "X1", "X2")
-  print("Initializing")
-  t.initb()
-  t.fill(0)
-  return t
+  @micropython.native
+  def fb_pixel(self, x, y, color):
+      """Draw pixel into frame buffer (color: 16bit RGB565)."""
+      if 0 <= x < self._size[0] and 0 <= y < self._size[1]:
+          idx = 2 * (y * self._size[0] + x)
+          self.framebuf[idx] = color >> 8
+          self.framebuf[idx + 1] = color & 0xFF
 
-def makeg(  ) :
-  t = TFT(1, "X1", "X2")
-  print("Initializing")
-  t.initg()
-  t.fill(0)
-  return t
+  def fb_fill(self, color):
+      """Fill frame buffer with color."""
+      hi = color >> 8
+      lo = color & 0xFF
+      pattern = bytes([hi, lo]) * 32  # 64 bajtů najednou
+      fb = self.framebuf
+      for i in range(0, len(fb), 64):
+          fb[i:i+64] = pattern
+
+  def fb_text(self, x, y, text, color, font):
+    px = x
+    hi = color >> 8
+    lo = color & 0xFF
+    for c in text:
+        ci = ord(c)
+        if font['Start'] <= ci <= font['End']:
+            fontw = font['Width']
+            fonth = font['Height']
+            ci = (ci - font['Start']) * fontw
+            charA = font["Data"][ci:ci + fontw]
+            for row in range(fonth):
+                for col in range(fontw):
+                    if charA[col] & (1 << row):
+                        fx = px + col
+                        fy = y + row
+                        if 0 <= fx < self._size[0] and 0 <= fy < self._size[1]:
+                            idx = 2 * (fy * self._size[0] + fx)
+                            self.framebuf[idx] = hi
+                            self.framebuf[idx + 1] = lo
+            px += fontw + 1
+        else:
+            px += font['Width'] + 1
+
+  def fb_bmp(self, filename, x=0, y=0):
+      """Draw 24bit BMP file into framebuffer at position (x, y)."""
+      with open(filename, "rb") as f:
+          if f.read(2) != b'BM':
+              print("Not a BMP file")
+              return
+          f.seek(10)
+          offset = int.from_bytes(f.read(4), "little")
+          f.seek(18)
+          width = int.from_bytes(f.read(4), "little")
+          height = int.from_bytes(f.read(4), "little")
+          f.seek(28)
+          bpp = int.from_bytes(f.read(2), "little")
+          if bpp != 24:
+              print("Only 24-bit BMP files are supported")
+              return
+          row_size = ((width * 3 + 3) // 4) * 4
+          f.seek(offset)
+          for row in range(height):
+              f.seek(offset + (height - 1 - row) * row_size)
+              line = f.read(width * 3)
+              linebuf = bytearray(self._size[0] * 2)
+              for col in range(width):
+                  b = line[col*3]
+                  g = line[col*3+1]
+                  r = line[col*3+2]
+                  color = ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3)
+                  idx = (x + col) * 2
+                  linebuf[idx] = color >> 8
+                  linebuf[idx + 1] = color & 0xFF
+              fbidx = 2 * ((y + row) * self._size[0])
+              self.framebuf[fbidx:fbidx + self._size[0]*2] = linebuf

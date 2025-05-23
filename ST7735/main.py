@@ -8,6 +8,7 @@ import re
 import st7735
 from sysfont import sysfont
 import ntptime
+import gc
 
 #var
 zastavka = "Beloruska" #jestli je v nazvu mezera tak misto ni pouzij + (Krivankovo+Namesti)
@@ -21,24 +22,33 @@ RED = 0xF800
 YELLOW = 0xFFE0
 
 # Nastavení SPI a pinů
-spi = machine.SPI(1, baudrate=20000000, polarity=0, phase=0)
+spi = machine.SPI(1, baudrate=40000000, polarity=0, phase=0)
 tft = st7735.TFT(spi, 14, 15, 13)
 tft.initr()
 tft.fill(0)
 tft.rotation(1)
-tft.show_bmp("splash.bmp")
+
+#nasaveni promenych
+last_odjezdy = []
+last_infotext = ""
+last_error = ""
+stopname = ""
+
+# Splash screen
+tft.fb_fill(0)
+tft.fb_bmp("splash.bmp", 0, 0)
+tft.show()
 utime.sleep(10)
 scroll_offset = 0
 
 #wifina
 if ssid == "SSID" or password == "passwd":
-    tft.fill(0)
+    tft.fb_fill(0)
     def draw_multiline_text(tft, x, y, text, color, font, max_width=160):
         chars_per_line = max_width // 6
         lines = [text[i:i+chars_per_line] for i in range(0, len(text), chars_per_line)]
         for idx, line in enumerate(lines):
-            tft.text((x, y + idx*12), line, color, font)
-
+            tft.fb_text(x, y + idx*12, line, color, font)
     draw_multiline_text(
         tft, 0, 0,
         "ty kokote, musis si nastavit v souboru main.py wifinu a zastavku",
@@ -49,6 +59,7 @@ if ssid == "SSID" or password == "passwd":
         "Error code: PEBKAC (problem exists between keyboard and chair)",
         RED, sysfont
     )
+    tft.show()
     exit("PEBKAC")
 else:
     machine.freq(133000000)
@@ -62,18 +73,21 @@ wlan.connect(ssid, password)
 timeout = 30
 start = utime.time()
 while not wlan.isconnected():
-    tft.fill(0)
-    tft.text((0, 0), "Pripojuji Wi-Fi...", WHITE, sysfont)
-    tft.text((0, 12), ssid, WHITE, sysfont)
+    tft.fb_fill(0)
+    tft.fb_text(0, 0, "Pripojuji Wi-Fi...", WHITE, sysfont)
+    tft.fb_text(0, 12, ssid, WHITE, sysfont)
+    tft.show()
     if utime.time() - start > timeout:
-        tft.fill(0)
-        tft.show_bmp("pepega.bmp")
+        tft.fb_fill(0)
+        tft.fb_bmp("pepega.bmp", 0, 0)
+        tft.show()
         exit("Pepega")
     print("Cekam na Wi-Fi...")
     time.sleep(1)
-tft.fill(0)
-tft.text((0, 0), "Wi-Fi pripojena", WHITE, sysfont)
-tft.text((0, 12), wlan.ifconfig()[0], WHITE, sysfont)
+tft.fb_fill(0)
+tft.fb_text(0, 0, "Wi-Fi pripojena", WHITE, sysfont)
+tft.fb_text(0, 12, wlan.ifconfig()[0], WHITE, sysfont)
+tft.show()
 print("Wi-Fi pripojena, IP adresa:", wlan.ifconfig()[0])
 time.sleep(2)  # <-- přidejte tuto řádku
 
@@ -163,61 +177,70 @@ def clear():
     print("\n" * 20)
             
 def clear_line(y, color=0, width=160, height=10):
-    tft.fillrect((0, y), (width, height), color)
-
-last_odjezdy = []
-last_infotext = ""
-scroll_offset = 0
-last_error = "" 
-stopname = ""
+    hi = color >> 8
+    lo = color & 0xFF
+    fb = tft.framebuf
+    for row in range(y, min(y + height, tft._size[1])):
+        idx = 2 * (row * tft._size[0])
+        fb[idx:idx + width*2] = bytes([hi, lo]) * width
 
 def draw_departures(odjezdy, infotext, scroll_offset):
     global last_error, stopname, scroll_offset_info
 
-    # ten vrchni radek
-    tft.fillrect((0, 0), (160, 10), 0)
+    # ... horní lišta a záhlaví ...
+    tft.fb_fill(0)
     stopid = zastavka.replace("+", " ")[:20]
     now = cesky_cas()
     cas = "{:02d}:{:02d}:{:02d}".format(now[3], now[4], now[5])
-    tft.text((0, 0), stopid + " " + nastupiste, WHITE, sysfont)
-    tft.text((110, 0), cas, WHITE, sysfont)
-    tft.fillrect((0, 10), (160, 10), 0)
-    tft.text((0, 10), "Linka", WHITE, sysfont)
-    tft.text((60, 10), "Smer", WHITE, sysfont)
-    tft.text((108, 10), "NP", WHITE, sysfont)
-    tft.text((124, 10), "Odjezd", WHITE, sysfont)
+    tft.fb_text(0, 0, stopid + " " + nastupiste, WHITE, sysfont)
+    tft.fb_text(110, 0, cas, WHITE, sysfont)
+    for xx in range(0, 160):
+        tft.fb_pixel(xx, 8, WHITE)
+    tft.fb_text(0, 10, "Linka", WHITE, sysfont)
+    tft.fb_text(60, 10, "Smer", WHITE, sysfont)
+    tft.fb_text(108, 10, "NP", WHITE, sysfont)
+    tft.fb_text(124, 10, "Odjezd", WHITE, sysfont)
+    for xx in range(0, 160):
+        tft.fb_pixel(xx, 18, WHITE)
+    tft.show_partial(0, 0, 160, 20)  # překresli pouze záhlaví
+
     y = 20
 
-
     if last_error:
-        tft.text((0, y), "Chyba site", RED, sysfont)
+        tft.fb_text(0, y, "Chyba site", RED, sysfont)
         err = to_ascii(str(last_error))
         for i in range(3):
             part = err[i*22:(i+1)*22]
             if part:
-                tft.text((0, y + 12 + i*12), part, RED, sysfont)
+                tft.fb_text(0, y + 12 + i*12, part, RED, sysfont)
+        tft.show_partial(0, y, 160, 48)
         return
 
     if not odjezdy:
-        tft.text((0, y), "Zadne odjezdy", RED, sysfont)
+        clear_line(y, 0)
+        tft.fb_text(0, y, "Zadne odjezdy", RED, sysfont)
+        tft.show_partial(0, y, 160, 10)
         y += 10
     else:
         for _, linka, konecna, vozik, cas in odjezdy[:10]:
             clear_line(y, 0)
             linka_ascii = to_ascii(f"{linka}")
             linka_px = len(linka_ascii) * 6
+            konecna_ascii = to_ascii(f"{konecna}")
+            konecna_px = len(konecna_ascii) * 6
+            konecna_visible_chars = (110 - 25) // 6
+
+            # Pro linka
             if linka_px > 120:
                 visible_chars = 120 // 6
-                start = scroll_offset % (len(linka_ascii) - visible_chars + 1)
+                start = scroll_offset_global % (len(linka_ascii) - visible_chars + 1)
                 linka_visible = linka_ascii[start:start+visible_chars]
             else:
                 linka_visible = linka_ascii
 
-            konecna_ascii = to_ascii(f"{konecna}")
-            konecna_px = len(konecna_ascii) * 6
-            konecna_visible_chars = (110 - 25) // 6  # prostor pro konečnou
+            # Pro konecna
             if konecna_px > konecna_visible_chars * 6:
-                start_k = scroll_offset % (len(konecna_ascii) - konecna_visible_chars + 1)
+                start_k = scroll_offset_global % (len(konecna_ascii) - konecna_visible_chars + 1)
                 konecna_visible = konecna_ascii[start_k:start_k+konecna_visible_chars]
             else:
                 konecna_visible = konecna_ascii
@@ -232,21 +255,18 @@ def draw_departures(odjezdy, infotext, scroll_offset):
 
             x_cas = 159 - len(cas_text) * 6
 
-            tft.text((0, y), linka_visible, RED, sysfont)
-            tft.text((25, y), konecna_visible, RED, sysfont)
-            tft.text((112, y), to_ascii(f"{vozik}"), RED, sysfont)
-            tft.text((x_cas, y), cas_text, RED, sysfont)
+            tft.fb_text(0, y, linka_visible, RED, sysfont)
+            tft.fb_text(25, y, konecna_visible, RED, sysfont)
+            tft.fb_text(112, y, to_ascii(f"{vozik}"), RED, sysfont)
+            tft.fb_text(x_cas, y, cas_text, RED, sysfont)
             y += 10
+
     if infotext:
-        # Pokud je infotext list, zobrazuj vždy jen jeden a cykli podle scroll_offset
         if isinstance(infotext, list) and len(infotext) > 0:
-            visible_chars = 160 // 6  # 26 znaků na řádek
-            # Vyber index infotextu podle toho, kolik už se odscrollovalo
+            visible_chars = 160 // 6 + 1
             info_ascii_list = [to_ascii(str(info)) for info in infotext]
-            # Spočítej, kolik scrollovacích kroků zabere každý infotext
             scroll_steps = [max(1, len(info_ascii) - visible_chars + 1) for info_ascii in info_ascii_list]
             total_steps = sum(scroll_steps)
-            # Najdi, který infotext se má aktuálně zobrazit
             step = scroll_offset_info % total_steps
             acc = 0
             for idx, steps in enumerate(scroll_steps):
@@ -255,19 +275,22 @@ def draw_departures(odjezdy, infotext, scroll_offset):
                     local_offset = step - acc
                     info_visible = info_ascii[local_offset:local_offset+visible_chars]
                     clear_line(y, 0)
-                    tft.text((0, y), info_visible, YELLOW, sysfont)
+                    tft.fb_text(0, y, info_visible, YELLOW, sysfont)
                     break
                 acc += steps
         else:
             clear_line(y, 0)
             info_ascii = to_ascii(str(infotext))
-            visible_chars = 160 // 6  # 26 znaků na řádek
+            visible_chars = 160 // 6
+            # Pro infotext
             if len(info_ascii) > visible_chars:
-                start = scroll_offset_info % (len(info_ascii) - visible_chars + 1)
+                start = scroll_offset_global % (len(info_ascii) - visible_chars + 1)
                 info_visible = info_ascii[start:start+visible_chars]
             else:
                 info_visible = info_ascii
-            tft.text((0, y), info_visible, YELLOW, sysfont)
+            tft.fb_text(0, y, info_visible, YELLOW, sysfont)
+
+    tft.show()
 
 def fetch():
     global last_odjezdy, last_infotext, last_error, stopname
@@ -277,9 +300,10 @@ def fetch():
         response = requests.get(url)
         last_error = ""  # Vynuluj chybu při úspěchu
     except Exception as e:
-        tft.fill(0)
-        tft.text((0, 0), "Chyba site (jestli to sviti uz dlouho tak to zkus restartovat)", RED, sysfont)
-        tft.text((0, 12), to_ascii(str(e)), RED, sysfont)
+        tft.fb_fill(0)
+        tft.fb_text(0, 0, "Chyba site (jestli to sviti uz dlouho tak to zkus restartovat)", RED, sysfont)
+        tft.fb_text(0, 12, to_ascii(str(e)), RED, sysfont)
+        tft.show()
         print("Network error:", e)
         last_odjezdy = []
         last_infotext = ""
@@ -328,30 +352,71 @@ def fetch():
         last_infotext = infotext
         last_error = ""  # Vynuluj chybu při úspěchu
     else:
-        tft.fill(0)
-        tft.text((0, 0), "Skill issue", RED, sysfont)
+        tft.fb_fill(0)
+        tft.fb_text(0, 0, "Skill issue", RED, sysfont)
+        tft.show()
         last_odjezdy = []
         last_infotext = ""
         stopname = ""
         last_error = "HTTP " + str(response.status_code)
+    gc.collect()
 
 # Hlavní smyčka
 fetch_interval = 15  # sekund
-draw_interval = 0.2  # sekund
+draw_interval = 0  # sekund
 last_fetch = utime.time()
-scroll_offset = 0
 scroll_offset_info = 0
 blikani_hvezdicek = 1
 
 now = cesky_cas()
 cas = "{:02d}:{:02d}:{:02d}".format(now[3], now[4], now[5])
 
+last_info_hash = ""
+scroll_pause_until = 0
+scroll_offset_global = 0
+
 while True:
-    now = cesky_cas()  # místo utime.localtime()
-    if utime.time() - last_fetch >= fetch_interval:
+    now = utime.time()
+    # Pauza scrollu infotextu
+    info_hash = str(last_infotext)
+
+    # Změna infotextu = reset scrollu a pauza
+    if info_hash != last_info_hash:
+        scroll_offset_global = 0
+        scroll_pause_until = now + 2
+        last_info_hash = info_hash
+
+    # Zastavení na konci infotextu
+    visible_chars = 160 // 6
+    if isinstance(last_infotext, list) and len(last_infotext) > 0:
+        info_ascii_list = [to_ascii(str(info)) for info in last_infotext]
+        scroll_steps = [max(1, len(info_ascii) - visible_chars + 1) for info_ascii in info_ascii_list]
+        total_steps = sum(scroll_steps)
+        step = scroll_offset_global % total_steps
+        acc = 0
+        for idx, steps in enumerate(scroll_steps):
+            if step < acc + steps:
+                if step == acc + steps - 1 and scroll_pause_until < now:
+                    scroll_pause_until = now + 2
+                break
+            acc += steps
+    else:
+        info_ascii = to_ascii(str(last_infotext))
+        if len(info_ascii) > visible_chars:
+            max_step = len(info_ascii) - visible_chars
+            if (scroll_offset_global % (max_step + 1)) == max_step and scroll_pause_until < now:
+                scroll_pause_until = now + 2
+
+    if now - last_fetch > fetch_interval:
         fetch()
-        last_fetch = utime.time()
-    draw_departures(last_odjezdy, last_infotext, scroll_offset)
-    scroll_offset += 1
-    scroll_offset_info += 3
+        last_fetch = now
+
+    draw_departures(last_odjezdy, last_infotext, scroll_offset_global)
+
+    # Scroll pouze pokud není pauza
+    if utime.time() >= scroll_pause_until:
+        scroll_offset_global += 1
+        scroll_offset_info += 3
+
+    gc.collect()
     utime.sleep(0.1)
