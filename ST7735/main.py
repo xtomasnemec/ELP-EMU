@@ -9,6 +9,7 @@ import st7735
 from sysfont import sysfont
 import ntptime
 import gc
+from beznohy import beznohy_pikto, plusminus_font
 # jenom ochrana pred kokotama
 import os
 
@@ -81,7 +82,7 @@ else:
     tft.show()
     exit("PEBKAC")
 
-required_files = ["st7735.py", "pepega.bmp", "splash.bmp", "sysfont.py"]
+required_files = ["st7735.py", "pepega.bmp", "splash.bmp", "sysfont.py", "beznohy.py", "config.py"]
 if all(file_exists(f) for f in required_files):
     print("vsechno mas stazeny")
 else:
@@ -334,8 +335,17 @@ def draw_departures(odjezdy, infotext, scroll_offset):
 
             tft.fb_text(0, y, linka_visible, RED, sysfont)
             tft.fb_text(25, y, konecna_visible, RED, sysfont)
-            tft.fb_text(112, y, to_ascii(f"{vozik}"), RED, sysfont)
-            tft.fb_text(x_cas, y, cas_text, RED, sysfont)
+            if vozik == "o":
+                tft.fb_text(112, y, "o", RED, beznohy_pikto)
+            else:
+                tft.fb_text(112, y, " ", RED, sysfont)
+            x = x_cas
+            for ch in cas_text:
+                if ch == "~":
+                    tft.fb_text(x, y, "~", RED, plusminus_font)
+                else:
+                    tft.fb_text(x, y, ch, RED, sysfont)
+                x += 6
             y += 10
 
     if infotext:
@@ -420,7 +430,7 @@ def fetch():
                     cas = departure.get('time', '')
                     beznohy = "♿" in cas
                     parsed = parse_time(cas)
-                    odjezdy.append((parsed, linka, konecna, "o" if beznohy else "", cas))
+                    odjezdy.append((parsed, linka, konecna, "o" if beznohy else " ", cas))
         odjezdy_valid = [o for o in odjezdy if o[0] >= 0]
         odjezdy_invalid = [o for o in odjezdy if o[0] < 0]
         odjezdy_valid.sort(key=lambda x: x[0])
