@@ -9,21 +9,103 @@ import st7735
 from sysfont import sysfont
 import ntptime
 import gc
+# jenom ochrana pred kokotama
+import os
 
-#var
-zastavka = "Beloruska" #jestli je v nazvu mezera tak misto ni pouzij + (Krivankovo+Namesti)
-nastupiste = "" #nastupiste (nech prazdy aby se ukazovali vsechny odjezdy)
-ssid = "SSID"  # Zde zadejte název vaší Wi-Fi sítě (deafult: SSID)
-password = "passwd"  # Zde zadejte heslo k vaší Wi-Fi síti (deafult: passwd)
+def file_exists(filename):
+    try:
+        os.stat(filename)
+        return True
+    except OSError:
+        return False
 
-#barvicky
-WHITE = 0xFFFF
-RED = 0xF800
-YELLOW = 0xFFE0
+def rename_file(old_name, new_name):
+    try:
+        os.rename(old_name, new_name)
+        print("Soubor přejmenován:", old_name, "→", new_name)
+        return True
+    except Exception as e:
+        print("Chyba při přejmenování:", e)
+        return False
+    
+def draw_multiline_text(tft, x, y, text, color, font, max_width=160):
+        chars_per_line = max_width // 6
+        lines = [text[i:i+chars_per_line] for i in range(0, len(text), chars_per_line)]
+        for idx, line in enumerate(lines):
+            tft.fb_text(x, y + idx*12, line, color, font)
 
-# Nastavení SPI a pinů
-spi = machine.SPI(1, baudrate=40000000, polarity=0, phase=0)
-tft = st7735.TFT(spi, 14, 15, 13)
+def delete_file(filename):
+    try:
+        os.remove(filename)
+        print("Soubor smazán:", filename)
+        return True
+    except Exception as e:
+        print("Chyba při mazání souboru:", e)
+        return False
+    
+#nacteni configu
+if file_exists("example.config.py"):
+    if not file_exists("config.py"):
+        rename_file("example.config.py", "config.py")
+        from config import zastavka, nastupiste, ssid, password, WHITE, RED, YELLOW, spi,tft, scroll_speed, scroll_speed_info , fetch_interval, draw_interval, frekvence, cesko, time_offset
+        tft.initr()
+        tft.fill(0)
+        tft.rotation(1)
+        draw_multiline_text(
+            tft, 0, 0,
+            "prosimte, moc jasne bylo v navodu napsany ze si mas nakonfigurovat soubor config.py pomoci souboru example.config.py, tedka jsem ti to prejmenoval ale jestli sis to nenastavil tak ti to nepojede",
+            0xF800, sysfont)
+        tft.show()
+        utime.sleep(5)
+    else: 
+        delete_file("example.config.py")
+        from config import zastavka, nastupiste, ssid, password, WHITE, RED, YELLOW, spi,tft, scroll_speed, scroll_speed_info , fetch_interval, draw_interval, frekvence, cesko, time_offset
+elif file_exists("config.py"):
+    from config import zastavka, nastupiste, ssid, password, WHITE, RED, YELLOW, spi,tft, scroll_speed, scroll_speed_info , fetch_interval, draw_interval, frekvence, cesko, time_offset
+else:
+    spi = machine.SPI(1, baudrate=20000000, polarity=0, phase=0)
+    tft = st7735.TFT(spi, 14, 15, 13)
+    tft.initr()
+    tft.fill(0)
+    tft.rotation(1)
+    draw_multiline_text(
+        tft, 0, 0,
+        "ty kokote, musis si nastavit soubor config.py, ten soubor proste nemuzu najit",
+        0xF800, sysfont
+    )
+    draw_multiline_text(
+        tft, 0, 60,
+        "Error code: PEBKAC (problem exists between keyboard and chair)",
+        0xF800, sysfont
+    )
+    tft.show()
+    exit("PEBKAC")
+
+required_files = ["st7735.py", "pepega.bmp", "splash.bmp", "sysfont.py"]
+if all(file_exists(f) for f in required_files):
+    print("vsechno mas stazeny")
+else:
+    spi = machine.SPI(1, baudrate=20000000, polarity=0, phase=0)
+    tft = st7735.TFT(spi, 14, 15, 13)
+    tft.initr()
+    tft.fill(0)
+    tft.rotation(1)
+    tft.fb_fill(0)
+    draw_multiline_text(
+        tft, 0, 0,
+        "ty kokote, musis si na to rpi stahnout vsechny soubory",
+        0xF800, sysfont
+    )
+    draw_multiline_text(
+        tft, 0, 60,
+        "Error code: PEBKAC (problem exists between keyboard and chair)",
+        0xF800, sysfont
+    )
+    tft.show()
+    exit("PEBKAC")
+
+#realnej zacatek kodu
+# display init
 tft.initr()
 tft.fill(0)
 tft.rotation(1)
@@ -42,16 +124,11 @@ utime.sleep(10)
 scroll_offset = 0
 
 #wifina
-if ssid == "SSID" or password == "passwd":
+if ssid == "SSID" or password == "passwd" or zastavka == "":
     tft.fb_fill(0)
-    def draw_multiline_text(tft, x, y, text, color, font, max_width=160):
-        chars_per_line = max_width // 6
-        lines = [text[i:i+chars_per_line] for i in range(0, len(text), chars_per_line)]
-        for idx, line in enumerate(lines):
-            tft.fb_text(x, y + idx*12, line, color, font)
     draw_multiline_text(
         tft, 0, 0,
-        "ty kokote, musis si nastavit v souboru main.py wifinu a zastavku",
+        "ty kokote, musis si nastavit v souboru config.py wifinu a zastavku",
         RED, sysfont
     )
     draw_multiline_text(
@@ -62,7 +139,7 @@ if ssid == "SSID" or password == "passwd":
     tft.show()
     exit("PEBKAC")
 else:
-    machine.freq(133000000)
+    machine.freq(frekvence)
     rp2.country('CZ')
     network.WLAN(network.STA_IF).active(True)
     network.WLAN(network.STA_IF).connect(ssid, password)
@@ -362,13 +439,15 @@ def fetch():
     gc.collect()
 
 # Hlavní smyčka
-fetch_interval = 15  # sekund
-draw_interval = 0  # sekund
 last_fetch = utime.time()
 scroll_offset_info = 0
 blikani_hvezdicek = 1
 
-now = cesky_cas()
+if cesko == True:
+    now = cesky_cas()
+elif cesko == False:
+    now = utime.localtime(utime.time() + int(time_offset) * 3600)
+
 cas = "{:02d}:{:02d}:{:02d}".format(now[3], now[4], now[5])
 
 last_info_hash = ""
@@ -413,10 +492,9 @@ while True:
 
     draw_departures(last_odjezdy, last_infotext, scroll_offset_global)
 
-    # Scroll pouze pokud není pauza
     if utime.time() >= scroll_pause_until:
-        scroll_offset_global += 1
-        scroll_offset_info += 3
+        scroll_offset_global += scroll_speed 
+        scroll_offset_info += scroll_speed_info 
 
     gc.collect()
-    utime.sleep(0.1)
+    utime.sleep(draw_interval)
