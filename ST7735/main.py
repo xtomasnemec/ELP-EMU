@@ -48,7 +48,7 @@ def delete_file(filename):
 if file_exists("example.config.py"):
     if not file_exists("config.py"):
         rename_file("example.config.py", "config.py")
-        from config import zastavka, nastupiste, ssid, password, WHITE, RED, YELLOW, spi,tft, scroll_speed, scroll_speed_info , fetch_interval, draw_interval, frekvence, cesko, time_offset
+        from config import zastavka, nastupiste, ssid, password, WHITE, RED, YELLOW, spi,tft, scroll_speed, scroll_speed_info , fetch_interval, draw_interval, frekvence, cesko, time_offset, scroll_pause_interval
         tft.initr()
         tft.fill(0)
         tft.rotation(1)
@@ -62,7 +62,7 @@ if file_exists("example.config.py"):
         delete_file("example.config.py")
         from config import zastavka, nastupiste, ssid, password, WHITE, RED, YELLOW, spi,tft, scroll_speed, scroll_speed_info , fetch_interval, draw_interval, frekvence, cesko, time_offset
 elif file_exists("config.py"):
-    from config import zastavka, nastupiste, ssid, password, WHITE, RED, YELLOW, spi,tft, scroll_speed, scroll_speed_info , fetch_interval, draw_interval, frekvence, cesko, time_offset
+    from config import zastavka, nastupiste, ssid, password, WHITE, RED, YELLOW, spi,tft, scroll_speed, scroll_speed_info , fetch_interval, draw_interval, frekvence, cesko, time_offset, scroll_pause_interval
 else:
     spi = machine.SPI(1, baudrate=20000000, polarity=0, phase=0)
     tft = st7735.TFT(spi, 14, 15, 13)
@@ -354,7 +354,7 @@ def draw_departures(odjezdy, infotext, scroll_offset):
             info_ascii_list = [to_ascii(str(info)) for info in infotext]
             scroll_steps = [max(1, len(info_ascii) - visible_chars + 1) for info_ascii in info_ascii_list]
             total_steps = sum(scroll_steps)
-            step = scroll_offset_info % total_steps
+            step = scroll_offset_info % total_steps  # OPRAVA: scroll_offset_info místo scroll_offset
             acc = 0
             for idx, steps in enumerate(scroll_steps):
                 if step < acc + steps:
@@ -369,9 +369,8 @@ def draw_departures(odjezdy, infotext, scroll_offset):
             clear_line(y, 0)
             info_ascii = to_ascii(str(infotext))
             visible_chars = 160 // 6
-            # Pro infotext
             if len(info_ascii) > visible_chars:
-                start = scroll_offset_global % (len(info_ascii) - visible_chars + 1)
+                start = scroll_offset_info % (len(info_ascii) - visible_chars + 1)  # OPRAVA: scroll_offset_info místo scroll_offset
                 info_visible = info_ascii[start:start+visible_chars]
             else:
                 info_visible = info_ascii
@@ -448,7 +447,6 @@ def fetch():
         last_error = "HTTP " + str(response.status_code)
     gc.collect()
 
-# Hlavní smyčka
 last_fetch = utime.time()
 scroll_offset_info = 0
 blikani_hvezdicek = 1
@@ -463,38 +461,54 @@ cas = "{:02d}:{:02d}:{:02d}".format(now[3], now[4], now[5])
 last_info_hash = ""
 scroll_pause_until = 0
 scroll_offset_global = 0
+scroll_pause_until_info = 0
+scroll_pause_until_global = 0
 
+# main loop
 while True:
     now = utime.time()
+    # Spočítej y pod všemi odjezdy
+    y = 20
+    if last_error:
+        y += 48
+    elif not last_odjezdy:
+        y += 10
+    else:
+        y += 10 * min(len(last_odjezdy), 10)
+
     # Pauza scrollu infotextu
     info_hash = str(last_infotext)
-
-    # Změna infotextu = reset scrollu a pauza
     if info_hash != last_info_hash:
         scroll_offset_global = 0
-        scroll_pause_until = now + 2
+        scroll_pause_until_global = now + scroll_pause_interval
+        scroll_offset_info = 0
+        scroll_pause_until_info = now + scroll_pause_interval  # ← přidej tuto řádku
         last_info_hash = info_hash
 
-    # Zastavení na konci infotextu
     visible_chars = 160 // 6
+
+    # Zjisti, jestli infotext je dlouhý (potřebuje scrollovat)
     if isinstance(last_infotext, list) and len(last_infotext) > 0:
         info_ascii_list = [to_ascii(str(info)) for info in last_infotext]
         scroll_steps = [max(1, len(info_ascii) - visible_chars + 1) for info_ascii in info_ascii_list]
         total_steps = sum(scroll_steps)
-        step = scroll_offset_global % total_steps
-        acc = 0
-        for idx, steps in enumerate(scroll_steps):
-            if step < acc + steps:
-                if step == acc + steps - 1 and scroll_pause_until < now:
-                    scroll_pause_until = now + 2
-                break
-            acc += steps
+        needs_scroll = total_steps > 1
     else:
         info_ascii = to_ascii(str(last_infotext))
-        if len(info_ascii) > visible_chars:
-            max_step = len(info_ascii) - visible_chars
-            if (scroll_offset_global % (max_step + 1)) == max_step and scroll_pause_until < now:
-                scroll_pause_until = now + 2
+        needs_scroll = len(info_ascii) > visible_chars
+
+    # Zastavení na konci infotextu
+    if needs_scroll:
+        if isinstance(last_infotext, list) and len(last_infotext) > 0:
+            max_offset = total_steps
+        else:
+            max_offset = len(info_ascii) - visible_chars + 1
+
+        if scroll_offset_info >= max_offset - 1:
+            scroll_offset_info = 0
+            scroll_pause_until_info = now + scroll_pause_interval
+        elif utime.time() >= scroll_pause_until_info:
+            scroll_offset_info += scroll_speed_info
 
     if now - last_fetch > fetch_interval:
         fetch()
@@ -502,9 +516,24 @@ while True:
 
     draw_departures(last_odjezdy, last_infotext, scroll_offset_global)
 
-    if utime.time() >= scroll_pause_until:
-        scroll_offset_global += scroll_speed 
-        scroll_offset_info += scroll_speed_info 
+    # --- SCROLL KONEČNÉ (linka/konečná) ---
+    # Spočítej max offset pro linku/konečnou (používá scroll_offset_global)
+    max_offset_global = 1
+    if last_odjezdy:
+        for _, linka, konecna, vozik, cas in last_odjezdy[:10]:
+            linka_ascii = to_ascii(f"{linka}")
+            konecna_ascii = to_ascii(f"{konecna}")
+            visible_linka = 120 // 6
+            visible_konecna = (110 - 25) // 6
+            max_offset_linka = max(1, len(linka_ascii) - visible_linka + 1)
+            max_offset_konecna = max(1, len(konecna_ascii) - visible_konecna + 1)
+            max_offset_global = max(max_offset_global, max_offset_linka, max_offset_konecna)
+
+    if scroll_offset_global >= max_offset_global - 1:
+        scroll_offset_global = 0
+        scroll_pause_until_global = now + scroll_pause_interval
+    elif utime.time() >= scroll_pause_until_global:
+        scroll_offset_global += scroll_speed
 
     gc.collect()
     utime.sleep(draw_interval)

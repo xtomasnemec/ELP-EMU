@@ -20,6 +20,7 @@ tft = st7735.TFT(spi, 14, 15, 13) # nastaveni pinu, 14 - CS, 15 - DC, 13 - RESET
 #rychlost scrolovani textu
 scroll_speed = 1 # rychlost scrolovani textu (default: 1)
 scroll_speed_info = 3 # rychlost scrolovani vyluk (default: 3)
+scroll_pause_interval = 2  # pauza mezi scrollovanim (default: 2) - v sekundach
 
 #rychlost aktualizace
 fetch_interval = 15  # sekund
