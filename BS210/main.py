@@ -1,6 +1,6 @@
 from machine import UART, Pin
 import utime as time
-from libIBIS import connect_panel, set_uart, send_panel_text, set_line, set_terminus, clear_panel
+from libIBIS import connect_panel, set_uart, send_panel_text, set_line, set_terminus, clear_panel, to_kamenicky, ibis_checksum, log_comm
 
 uart = connect_panel()
 set_uart(uart)

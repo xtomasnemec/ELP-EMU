@@ -3,6 +3,22 @@ import utime as time
 
 uart = None
 
+def log_comm(data: bytes, direction: str = "TX"):
+    """
+    Zapíše komunikaci do souboru 'ibis_log.txt' na Pico.
+    direction: "TX" (odesláno) nebo "RX" (přijato)
+    """
+    try:
+        with open("ibis_log.txt", "a") as f:
+            # Zaloguje čas, směr a data v hexadecimálním tvaru
+            import utime
+            timestamp = utime.localtime()
+            timestr = "{:04}-{:02}-{:02} {:02}:{:02}:{:02}".format(*timestamp[:6])
+            hexdata = " ".join("{:02X}".format(b) for b in data)
+            f.write(f"{timestr} [{direction}] {hexdata}\n")
+    except Exception as e:
+        pass  # Při chybě logování nevyhazuj výjimku
+
 def set_uart(uart_instance):
     global uart
     uart = uart_instance
@@ -52,24 +68,54 @@ def to_kamenicky(text):
     return result
 
 def send_panel_text(line, pos, text):
-    # Sestaví zprávu ve formátu z2A2Hello World!\r a odešle ji na panel
+    # Sestaví zprávu ve formátu z2A2Hello World!\r a odešle ji na panel s IBIS kontrolním součtem
     msg = f"z{line}{pos}{text}\r"
-    uart.write(to_kamenicky(msg))
+    data = to_kamenicky(msg)
+    cs = ibis_checksum(data)
+    uart.write(data + bytes([cs]))
+    log_comm(data + bytes([cs]), "TX")
 
 def set_line(linka):
-    # nastaví linku
+    # nastaví linku s IBIS kontrolním součtem
     msg = f"L{linka}\r"
-    uart.write(to_kamenicky(msg))
+    data = to_kamenicky(msg)
+    cs = ibis_checksum(data)
+    uart.write(data + bytes([cs]))
+    log_comm(data + bytes([cs]), "TX")
 
 def set_terminus(kod_cile):
-    # nastaví kód cíle podle databáze v panelu
+    # nastaví kód cíle podle databáze v panelu s IBIS kontrolním součtem
     msg = f"Z{kod_cile}\r"
-    uart.write(to_kamenicky(msg))
+    data = to_kamenicky(msg)
+    cs = ibis_checksum(data)
+    uart.write(data + bytes([cs]))
+    log_comm(data + bytes([cs]), "TX")
 
 def clear_panel():
     """
     Vyčistí (smaže) obsah panelu BS210 se standardním brněnským firmwarem.
-    Obvykle funguje příkaz 'X\r'.
+    Obvykle funguje příkaz 'X\r' s IBIS kontrolním součtem.
     """
     msg = "X\r"
-    uart.write(to_kamenicky(msg))
+    data = to_kamenicky(msg)
+    cs = ibis_checksum(data)
+    uart.write(data + bytes([cs]))
+    log_comm(data + bytes([cs]), "TX")
+
+def ibis_checksum(data: bytes) -> int:
+    """Spočítá IBIS kontrolní součet (XOR všech bajtů + 0x7F)."""
+    cs = 0
+    for b in data:
+        cs ^= b
+    cs ^= 0x7F
+    return cs
+
+def send_ibis_cmd(cmd: str):
+    """
+    Odešle IBIS příkaz s kontrolním součtem.
+    cmd: příkaz bez CR a KS (např. 'xC0')
+    """
+    msg = cmd.encode("ascii") + b'\r'
+    cs = ibis_checksum(msg)
+    uart.write(msg + bytes([cs]))
+    log_comm(msg + bytes([cs]), "TX")
