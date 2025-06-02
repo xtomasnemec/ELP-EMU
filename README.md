@@ -1,4 +1,4 @@
-# RPi-Pico-MHD-Tabule
+# ELP EMU
 Displej co používá KORDIS API pro zobrazování odjezdů
 Vytvořeno pro Raspberry Pi Pico W a Pico 2 W
 
