@@ -1,9 +1,10 @@
 #include <Arduino.h>
 #include <SoftwareSerial.h>
 
-// UART nastavení
 #define PANEL_BAUD 1200
-SoftwareSerial PANEL_SERIAL(10, 11); // RX, TX pro panel (zvol správné piny)
+
+SoftwareSerial panelSerial(2, 3); // RX, TX (D2, D3)
+SoftwareSerial picoSerial(4, 5); // RX = D4, TX = D5
 
 // Pomocné funkce pro IBIS komunikaci
 uint8_t ibis_checksum(const uint8_t *data, size_t len) {
@@ -28,8 +29,8 @@ void send_ibis(const char *msg) {
   to_kamenicky(msg, buf, sizeof(buf) - 1);
   size_t len = strlen((char*)buf);
   uint8_t cs = ibis_checksum(buf, len);
-  PANEL_SERIAL.write(buf, len);
-  PANEL_SERIAL.write(cs);
+  picoSerial.write(buf, len);
+  picoSerial.write(cs);
 
   // Poslat i do USB (Serial Monitor)
   Serial.print("SEND: ");
@@ -40,9 +41,9 @@ void send_ibis(const char *msg) {
 }
 
 // Ovládací funkce
-void send_panel_text(const char *line, const char *pos, const char *text) {
+void send_panel_text(const char *adress, const char *pos, const char *text) {
   char msg[64];
-  snprintf(msg, sizeof(msg), "z%s%s%s\r", line, pos, text);
+  snprintf(msg, sizeof(msg), "zA%s%s%s\r", adress, pos, text);
   send_ibis(msg);
 }
 
@@ -63,14 +64,21 @@ void clear_panel() {
 }
 
 void setup() {
-  Serial.begin(9600); // USB pro ladění
-  PANEL_SERIAL.begin(PANEL_BAUD); // pouze 8N1!
+  Serial.begin(115200);
+  panelSerial.begin(PANEL_BAUD);
+  picoSerial.begin(9600);
   delay(300); // počkej na stabilizaci UART
 }
 
 void loop() {
-  set_line("069");
-  send_panel_text("2", "A2", "HELLO WORLD!");
-  delay(5000);
-  clear_panel();
+  if (Serial.available()) {
+    String cmd = Serial.readStringUntil('\n');
+    cmd.trim();
+    if (cmd.startsWith("LINE:")) {
+      set_line(cmd.substring(5).c_str());
+    } else if (cmd.startsWith("TEXT:")) {
+      send_panel_text("0", "2", cmd.substring(5).c_str());
+    }
+    // Další příkazy dle potřeby
+  }
 }
